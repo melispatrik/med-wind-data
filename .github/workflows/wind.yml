@@ -1,0 +1,48 @@
+name: Build wind file
+
+# ECMWF publishes a run 7-8 hours after its nominal time (00, 06, 12, 18 UTC).
+# Each run of this job picks up the newest one available.
+on:
+  schedule:
+    - cron: "15 2,8,14,20 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wind
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Build wind.json
+        run: |
+          mkdir out
+          python build_wind.py out/wind.json
+
+      # The file replaces itself on a branch with a single commit, so the
+      # repository does not grow by a megabyte four times a day.
+      - name: Publish to the data branch
+        working-directory: out
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q -b data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add wind.json
+          git commit -q -m "Wind $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" data
