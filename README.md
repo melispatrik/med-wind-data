@@ -11,7 +11,6 @@ the ECMWF IFS open-data forecast.
   - `index.json` lists the frames:
     `https://raw.githubusercontent.com/melispatrik/med-wind-data/data/index.json`
   - `frames/<YYYYMMDDHH>.json` is one frame, named by the UTC hour it describes.
-  - `wind.json` is the first day in a single file.
 
 The data is from [ECMWF open data](https://www.ecmwf.int/en/forecasts/datasets/open-data),
 licensed CC BY 4.0. Credit ECMWF wherever you show it. It is a forecast, not a
