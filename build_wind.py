@@ -6,7 +6,6 @@ Mediterranean and writes, into the output directory:
     index.json            { "source", "run", "built",
                             "frames": [ { "validTime": "<ISO>", "file": "frames/2026111312.json" } ] }
     frames/<stamp>.json   { "validTime": "<ISO>", "header": {...}, "u": [...], "v": [...] }
-    wind.json             the first day as one file (the earlier single-file layout)
 
 One frame every three hours, from the first hour that is still ahead of "now"
 when the run is published to a little over three days out. `header` + `u`/`v`
@@ -38,9 +37,6 @@ WEST, EAST, SOUTH, NORTH = -12.0, 30.0, 28.0, 48.0
 # six hours, so step 6 is always at or before "now". 90 h is as far as the
 # 06 and 18 UTC runs go, and leaves three full days ahead at the worst moment.
 STEPS = list(range(6, 91, 3))
-
-# How many frames the single-file layout carries.
-LEGACY_FRAMES = 7
 
 
 def read_fields(path):
@@ -142,9 +138,6 @@ def main(out_dir):
         write_json(os.path.join(out_dir, "frames", f"{stamp}.json"), frame)
         index.append({"validTime": frame["validTime"], "file": f"frames/{stamp}.json"})
     write_json(os.path.join(out_dir, "index.json"), {**meta, "frames": index})
-    write_json(
-        os.path.join(out_dir, "wind.json"), {**meta, "frames": frames[:LEGACY_FRAMES]}
-    )
 
     head = frames[0]["header"]
     print(
