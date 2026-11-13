@@ -1,23 +1,28 @@
-"""Build a Mediterranean wind file from ECMWF open data.
+"""Build Mediterranean wind files from ECMWF open data.
 
 Downloads the 10 m wind (u and v) of the latest ECMWF IFS run, crops it to the
-Mediterranean and writes one small JSON file a web map can read:
+Mediterranean and writes, into the output directory:
 
-    { "source": "ECMWF IFS open data", "run": "<ISO time of the model run>",
-      "frames": [ { "validTime": "<ISO>", "header": {...}, "u": [...], "v": [...] } ] }
+    index.json            { "source", "run", "built",
+                            "frames": [ { "validTime": "<ISO>", "file": "frames/2026111312.json" } ] }
+    frames/<stamp>.json   { "validTime": "<ISO>", "header": {...}, "u": [...], "v": [...] }
+    wind.json             the first day as one file (the earlier single-file layout)
 
-`header` + `u`/`v` are the grid layout leaflet-velocity expects (rows from the
-north-west corner, west to east, north to south). Values are m/s, one decimal.
+One frame every three hours, from the first hour that is still ahead of "now"
+when the run is published to a little over three days out. `header` + `u`/`v`
+are the grid layout leaflet-velocity expects (rows from the north-west corner,
+west to east, north to south). Values are m/s, one decimal.
 
 ECMWF's files are GRIB2 with CCSDS packing, which nothing in Node can decode —
 that is why this is a Python job. Data licence: CC-BY-4.0; whoever shows the
 data credits ECMWF.
 
     pip install -r requirements.txt
-    python build_wind.py wind.json
+    python build_wind.py out
 """
 
 import json
+import os
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -30,8 +35,12 @@ from ecmwf.opendata import Client
 WEST, EAST, SOUTH, NORTH = -12.0, 30.0, 28.0, 48.0
 
 # A run is published 7-9 hours after its nominal time and this job runs every
-# six hours, so steps 6-24 h always bracket "now".
-STEPS = [6, 9, 12, 15, 18, 21, 24]
+# six hours, so step 6 is always at or before "now". 90 h is as far as the
+# 06 and 18 UTC runs go, and leaves three full days ahead at the worst moment.
+STEPS = list(range(6, 91, 3))
+
+# How many frames the single-file layout carries.
+LEGACY_FRAMES = 7
 
 
 def read_fields(path):
@@ -78,7 +87,12 @@ def crop(values, lats, lons):
     return values[np.ix_(rows, cols)], lats[rows], lons[cols]
 
 
-def main(target):
+def write_json(path, payload):
+    with open(path, "w") as f:
+        json.dump(payload, f, separators=(",", ":"))
+
+
+def main(out_dir):
     client = Client(source="ecmwf")
     with tempfile.NamedTemporaryFile(suffix=".grib2") as tmp:
         result = client.retrieve(
@@ -95,9 +109,10 @@ def main(target):
     for step in sorted(by_step):
         u, lats, lons = by_step[step]["10u"]
         v, _, _ = by_step[step]["10v"]
+        valid = run + timedelta(hours=step)
         frames.append(
             {
-                "validTime": (run + timedelta(hours=step)).isoformat(),
+                "validTime": valid.isoformat(),
                 "header": {
                     "nx": int(len(lons)),
                     "ny": int(len(lats)),
@@ -112,18 +127,31 @@ def main(target):
                 "v": [round(float(x), 1) for x in v.ravel()],
             }
         )
+    if len(frames) != len(STEPS):
+        raise SystemExit(f"expected {len(STEPS)} frames, got {len(frames)}")
 
-    payload = {
+    meta = {
         "source": "ECMWF IFS open data",
         "run": run.isoformat(),
         "built": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "frames": frames,
     }
-    with open(target, "w") as f:
-        json.dump(payload, f, separators=(",", ":"))
+    os.makedirs(os.path.join(out_dir, "frames"), exist_ok=True)
+    index = []
+    for frame in frames:
+        stamp = datetime.fromisoformat(frame["validTime"]).strftime("%Y%m%d%H")
+        write_json(os.path.join(out_dir, "frames", f"{stamp}.json"), frame)
+        index.append({"validTime": frame["validTime"], "file": f"frames/{stamp}.json"})
+    write_json(os.path.join(out_dir, "index.json"), {**meta, "frames": index})
+    write_json(
+        os.path.join(out_dir, "wind.json"), {**meta, "frames": frames[:LEGACY_FRAMES]}
+    )
+
     head = frames[0]["header"]
-    print(f"run {run:%Y-%m-%d %H}Z, {len(frames)} frames, grid {head['nx']}x{head['ny']}")
+    print(
+        f"run {run:%Y-%m-%d %H}Z, {len(frames)} frames to "
+        f"{frames[-1]['validTime']}, grid {head['nx']}x{head['ny']}"
+    )
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "wind.json")
+    main(sys.argv[1] if len(sys.argv) > 1 else "out")
